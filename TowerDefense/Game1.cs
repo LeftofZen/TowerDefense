@@ -1,11 +1,23 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Audio;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
+using Microsoft.Xna.Framework.Media;
 
 namespace TowerDefense
 {
+	public static class GameServices
+	{
+		public static readonly Dictionary<string, Texture2D> Textures = new Dictionary<string, Texture2D>(); // TextureCollection??
+		public static readonly Dictionary<string, SpriteFont> Fonts = new Dictionary<string, SpriteFont>(); //
+		public static readonly Dictionary<string, SoundEffect> SoundEffects = new Dictionary<string, SoundEffect>(); // SoundBank??
+		public static readonly Dictionary<string, Song> Songs = new Dictionary<string, Song>(); // SongCollection??
+																								//public static InputManager InputManager;
+	}
+
 	public class Game1 : Game
 	{
 		private GraphicsDeviceManager _graphics;
@@ -21,9 +33,13 @@ namespace TowerDefense
 		double lastSpawnTime;
 		double spawnInterval = 1.0;
 		List<Enemy> enemies;
-		float speed = 1f;
+		float speed = 2f;
 		float goalHealth = 1000;
 		float goalMaxHealth = 1000;
+		bool mapDrawingMode = true;
+		int enemyInitialHealth = 100;
+		List<Tower> towers;
+		int score = 0;
 
 		public Game1()
 		{
@@ -41,6 +57,7 @@ namespace TowerDefense
 
 			enemyPath = new List<Point>();
 			enemies = new List<Enemy>();
+			towers = new List<Tower>();
 
 			colourLookup = new Dictionary<TileType, Color>();
 			colourLookup.Add(TileType.Blocked, Color.Black);
@@ -70,7 +87,17 @@ namespace TowerDefense
 		{
 			_spriteBatch = new SpriteBatch(GraphicsDevice);
 
-			// TODO: use this.Content to load your game content here
+			var fontNames = new List<string> { "SergoeUI" };
+			foreach (var v in fontNames)
+			{
+				GameServices.Fonts.Add(v, Content.Load<SpriteFont>("Fonts\\" + v));
+			}
+
+			var sfxNames = new List<string> { "laser1", "explosion1", "explosion2", "blip1" };
+			foreach (var v in sfxNames)
+			{
+				GameServices.SoundEffects.Add(v, Content.Load<SoundEffect>("SoundEffects\\" + v));
+			}
 		}
 
 		protected override void Update(GameTime gameTime)
@@ -80,27 +107,105 @@ namespace TowerDefense
 
 			var mouse = Mouse.GetState();
 			var translated = mouse.Position.ToVector2() - new Vector2(64, 64);
-			var tile = new Point((int)(translated.X / 32), (int)(translated.Y / 32));
+			var mouseTile = new Point((int)(translated.X / 32), (int)(translated.Y / 32));
 
-			// drawing path
-			if (ContainedInMap(map, tile))
+			var keyboard = Keyboard.GetState();
+			if (keyboard.IsKeyDown(Keys.Space))
 			{
-				if (mouse.LeftButton == ButtonState.Pressed)
+				mapDrawingMode = !mapDrawingMode;
+			}
+
+
+			if (mapDrawingMode)
+			{
+				// drawing path
+				if (ContainedInMap(map, mouseTile))
 				{
-					map[tile.Y, tile.X].type = TileType.Path;
+					var tile = map[mouseTile.Y, mouseTile.X];
+					if (mouse.LeftButton == ButtonState.Pressed)
+					{
+						if (tile.type != TileType.Goal && tile.type != TileType.Spawn)
+						{
+							tile.type = TileType.Path;
+						}
+					}
+					if (mouse.RightButton == ButtonState.Pressed)
+					{
+						if (tile.type != TileType.Goal && tile.type != TileType.Spawn)
+						{
+							tile.type = TileType.Free;
+						}
+					}
 				}
-				if (mouse.RightButton == ButtonState.Pressed)
+				UpdatePath();
+			}
+			else
+			{
+				// drawing towers
+				if (ContainedInMap(map, mouseTile))
 				{
-					map[tile.Y, tile.X].type = TileType.Free;
+					var tile = map[mouseTile.Y, mouseTile.X];
+					if (mouse.LeftButton == ButtonState.Pressed)
+					{
+						if (tile.type == TileType.Free && tile.tower == null)
+						{
+							tile.tower = new Tower(mouseTile);
+							towers.Add(tile.tower);
+						}
+					}
+					if (mouse.RightButton == ButtonState.Pressed)
+					{
+						if (tile.type == TileType.Free && tile.tower != null)
+						{
+							_ = towers.Remove(tile.tower);
+							tile.tower = null;
+						}
+					}
 				}
 			}
 
-			UpdatePath();
+			UpdateTowers(gameTime);
 			UpdateEnemies(gameTime);
 			UpdateWinLoseCondition();
 
-
 			base.Update(gameTime);
+		}
+
+		void UpdateTowers(GameTime gameTime)
+		{
+			foreach (var t in towers)
+			{
+				var time = (float)gameTime.TotalGameTime.TotalSeconds;
+				if (time - t.lastFireTime > t.cooldown)
+				{
+					Enemy closestEnemy = null;
+					foreach (var e in enemies)
+					{
+						if (t.distToEnemy(e) < t.range)
+						{
+							if (closestEnemy == null || t.distToEnemy(e) < t.distToEnemy(closestEnemy))
+							{
+								closestEnemy = e;
+							}
+						}
+					}
+
+					if (closestEnemy != null)
+					{
+						// fire at enemy
+						t.BulletLine = (t.Center, closestEnemy.position);
+						closestEnemy.health -= t.dps;
+						t.lastFireTime = time;
+						PlaySound("laser1");
+					}
+				}
+
+				// fade time for bullet line
+				if (gameTime.TotalGameTime.TotalSeconds - t.bulletDrawFadeTime > t.lastFireTime)
+				{
+					t.BulletLine = null;
+				}
+			}
 		}
 
 		void UpdateWinLoseCondition()
@@ -116,10 +221,18 @@ namespace TowerDefense
 
 		}
 
+		void PlaySound(string soundName)
+		{
+			var sfx = GameServices.SoundEffects[soundName].CreateInstance();
+			sfx.Volume = 0.1f;
+			sfx.Play();
+		}
+
 		void UpdateEnemies(GameTime gameTime)
 		{
 			if (!hasPath)
 			{
+				enemies.Clear();
 				return;
 			}
 
@@ -128,10 +241,14 @@ namespace TowerDefense
 			var curr = gameTime.TotalGameTime.TotalSeconds;
 			if (curr - lastSpawnTime > spawnInterval)
 			{
-				var spawn = FindTile(map, TileType.Spawn);
-				// spawn
-				enemies.Add(new Enemy(spawn.ToVector2() * new Vector2(32), goal, 100));
-				lastSpawnTime = curr;
+				//if (goalHealth > 0)
+				{
+					// spawn
+					var spawn = FindTile(map, TileType.Spawn);
+					enemies.Add(new Enemy((spawn.ToVector2() * new Vector2(32)) + new Vector2(16), enemyInitialHealth));
+					lastSpawnTime = curr;
+					PlaySound("blip1");
+				}
 			}
 
 			// update enemies
@@ -139,21 +256,36 @@ namespace TowerDefense
 			var toDelete = new List<Enemy>();
 			foreach (var e in enemies)
 			{
+				if (e.health <= 0)
+				{
+					// enemy died
+					score += enemyInitialHealth;
+					toDelete.Add(e);
+					PlaySound("explosion1");
+					continue;
+				}
+
 				var etile = (e.position / new Vector2(32)).ToPoint();
 
 				if (etile == goal)
 				{
+					// enemy got to goal tile
+					score -= e.health;
 					goalHealth -= e.health;
 					toDelete.Add(e);
+					PlaySound("explosion2");
 					continue;
-					// enemy got to goal tile
 				}
 
-				var nextTileIndex = enemyPath.FindIndex(ee => ee == etile) + 1;
-				if (nextTileIndex < 0)
-					continue;
+				var index = enemyPath.FindIndex(ee => ee == etile);
+				if (index == -1)
+				{
+					throw new Exception("Index for enemy path wasn't found");
+				}
+
+				var nextTileIndex = index + 1;
 				var nextTile = enemyPath[nextTileIndex];
-				var dst = nextTile.ToVector2() * new Vector2(32);
+				var dst = nextTile.ToVector2() * new Vector2(32) + new Vector2(16);
 				var dir = dst - e.position;
 				dir.Normalize();
 				e.position += dir * new Vector2(speed);
@@ -162,7 +294,7 @@ namespace TowerDefense
 			// 'kill' enemies that reached the base
 			foreach (var v in toDelete)
 			{
-				enemies.Remove(v);
+				_ = enemies.Remove(v);
 			}
 		}
 
@@ -237,28 +369,15 @@ namespace TowerDefense
 		{
 			GraphicsDevice.Clear(Color.CornflowerBlue);
 
-			// gui
-
-			_spriteBatch.Begin();
-
-			// base health bar
-			_spriteBatch.Draw(pixel, new Rectangle(0, 0, 16, 16), hasPath ? Color.Green : Color.Red);
-
-			// hasPath status
-			_spriteBatch.Draw(pixel, new Rectangle(0, 0, 16, 200), Color.DarkGray);
-			_spriteBatch.Draw(pixel, new Rectangle(0, 0, 16, (int)(goalHealth / goalMaxHealth * 200f)), Color.LightGoldenrodYellow);
-
-			_spriteBatch.End();
-
 			// map
-
 			_spriteBatch.Begin(transformMatrix: Matrix.CreateTranslation(64, 64, 0));
 
 			for (var y = 0; y < mapHeight; y++)
 			{
 				for (var x = 0; x < mapWidth; x++)
 				{
-					_spriteBatch.Draw(pixel, new Rectangle(x * 32, y * 32, 32, 32), colourLookup[map[y, x].type]);
+					_spriteBatch.Draw(pixel, new Rectangle(x * 32, y * 32, 32, 32), Color.Black);
+					_spriteBatch.Draw(pixel, new Rectangle(x * 32 + 1, y * 32 + 1, 30, 30), colourLookup[map[y, x].type]);
 				}
 			}
 
@@ -269,20 +388,88 @@ namespace TowerDefense
 
 			foreach (var e in enemies)
 			{
-				_spriteBatch.Draw(pixel, new Rectangle((int)e.position.X, (int)e.position.Y, 8, 8), Color.Blue);
+				_spriteBatch.Draw(pixel, new Rectangle((int)e.position.X - 4, (int)e.position.Y - 4, 8, 8), Color.Blue);
+
+				// health bar
+				var barWidth = 32;
+				var percent = (float)e.health / enemyInitialHealth;
+				_spriteBatch.Draw(pixel, new Rectangle((int)e.position.X - barWidth / 2, (int)e.position.Y - 4 - 8, barWidth, 4), Color.Red);
+				_spriteBatch.Draw(pixel, new Rectangle((int)e.position.X - barWidth / 2, (int)e.position.Y - 4 - 8, (int)(barWidth * percent), 4), Color.Green);
 			}
+
+			foreach (var t in towers)
+			{
+				_spriteBatch.Draw(pixel, new Rectangle(t.Tile.X * 32 + 4, t.Tile.Y * 32 + 4, 24, 24), Color.Purple);
+
+				// bullet line
+				if (t.BulletLine.HasValue)
+				{
+					var src = t.BulletLine.Value.Item1;
+					var dst = t.BulletLine.Value.Item2;
+					DrawLine(_spriteBatch, src, dst);
+				}
+			}
+
+			_spriteBatch.End();
+
+			///
+			// gui
+			///
+
+			_spriteBatch.Begin();
+
+			// base health bar
+			_spriteBatch.Draw(pixel, new Rectangle(0, 0, 16, 200), Color.Red);
+			_spriteBatch.Draw(pixel, new Rectangle(0, 0, 16, (int)(goalHealth / goalMaxHealth * 200f)), Color.Green);
+
+			// hasPath status
+			_spriteBatch.Draw(pixel, new Rectangle(16, 0, 16, 16), hasPath ? Color.Green : Color.Red);
+
+			// drawing mode status
+			_spriteBatch.Draw(pixel, new Rectangle(32, 0, 16, 16), mapDrawingMode ? Color.Green : Color.Red);
 
 			_spriteBatch.End();
 
 			base.Draw(gameTime);
 		}
+
+		void DrawLine(SpriteBatch sb, Vector2 start, Vector2 end)
+		{
+			Vector2 edge = end - start;
+			// calculate angle to rotate line
+			float angle = (float)Math.Atan2(edge.Y, edge.X);
+
+			sb.Draw(pixel,
+				new Rectangle(// rectangle defines shape of line and position of start of line
+					(int)start.X,
+					(int)start.Y,
+					(int)edge.Length(), //sb will stretch the texture to fill this rectangle
+					3), //width of line, change this to make thicker line
+				null,
+				Color.Aqua, //colour of line
+				angle,     //angle of line (calulated above)
+				new Vector2(0, 0), // point in line about which to rotate
+				SpriteEffects.None,
+				0);
+		}
 	}
 
-	interface ITower
-	{ }
+	class Tower
+	{
+		public int dps = 25;
+		public float cooldown = 0.5f;
+		public float lastFireTime;
+		public float range = 96;
+		public float bulletDrawFadeTime = 0.2f;
+		public (Vector2, Vector2)? BulletLine { get; set; }
+		public Point Tile { get; set; }
 
-	class Tower : ITower
-	{ }
+		public Vector2 Center => (Tile.ToVector2() * new Vector2(32)) + new Vector2(16);
+
+		public Tower(Point tile) => Tile = tile;
+
+		public float distToEnemy(Enemy e) => Vector2.Distance(e.position, Center);
+	}
 
 	enum TileType
 	{
@@ -291,20 +478,18 @@ namespace TowerDefense
 
 	class Tile
 	{
-		public ITower tower;
+		public Tower tower;
 		public TileType type;
 	}
 
 	class Enemy
 	{
 		public Vector2 position;
-		Point goalTile;
 		public int health;
 
-		public Enemy(Vector2 position, Point goalTile, int health)
+		public Enemy(Vector2 position, int health)
 		{
 			this.position = position;
-			this.goalTile = goalTile;
 			this.health = health;
 		}
 	}
