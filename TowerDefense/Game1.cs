@@ -1,11 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using ImGuiNET;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Audio;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using Microsoft.Xna.Framework.Media;
+using MonoGame.Extended;
+using MonoGame.ImGui.Standard;
 
 namespace TowerDefense
 {
@@ -15,14 +18,14 @@ namespace TowerDefense
 		public static readonly Dictionary<string, SpriteFont> Fonts = new Dictionary<string, SpriteFont>(); //
 		public static readonly Dictionary<string, SoundEffect> SoundEffects = new Dictionary<string, SoundEffect>(); // SoundBank??
 		public static readonly Dictionary<string, Song> Songs = new Dictionary<string, Song>(); // SongCollection??
-																								//public static InputManager InputManager;
+																								// public static InputManager InputManager;
 	}
 
 	public class Game1 : Game
 	{
 		private GraphicsDeviceManager _graphics;
 		private SpriteBatch _spriteBatch;
-
+		public ImGUIRenderer GuiRenderer;
 		Tile[,] map;
 		int mapWidth = 10;
 		int mapHeight = 10;
@@ -40,24 +43,29 @@ namespace TowerDefense
 		int enemyInitialHealth = 100;
 		List<Tower> towers;
 		int score = 0;
+		Random rnd;
 
 		public Game1()
 		{
 			_graphics = new GraphicsDeviceManager(this);
+			_graphics.SynchronizeWithVerticalRetrace = false;
+
 			Content.RootDirectory = "Content";
+
+			Window.AllowUserResizing = true;
 			IsMouseVisible = true;
 		}
 
 		protected override void Initialize()
 		{
-			// TODO: Add your initialization logic here
-
 			pixel = new Texture2D(_graphics.GraphicsDevice, 1, 1);
 			pixel.SetData(new Color[] { Color.White });
 
 			enemyPath = new List<Point>();
 			enemies = new List<Enemy>();
 			towers = new List<Tower>();
+
+			rnd = new Random();
 
 			colourLookup = new Dictionary<TileType, Color>();
 			colourLookup.Add(TileType.Blocked, Color.Black);
@@ -79,6 +87,8 @@ namespace TowerDefense
 
 			map[1, 1].type = TileType.Spawn;
 			map[8, 8].type = TileType.Goal;
+
+			GuiRenderer = new ImGUIRenderer(this).Initialize().RebuildFontAtlas();
 
 			base.Initialize();
 		}
@@ -110,11 +120,6 @@ namespace TowerDefense
 			var mouseTile = new Point((int)(translated.X / 32), (int)(translated.Y / 32));
 
 			var keyboard = Keyboard.GetState();
-			if (keyboard.IsKeyDown(Keys.Space))
-			{
-				mapDrawingMode = !mapDrawingMode;
-			}
-
 
 			if (mapDrawingMode)
 			{
@@ -194,7 +199,7 @@ namespace TowerDefense
 					{
 						// fire at enemy
 						t.BulletLine = (t.Center, closestEnemy.position);
-						closestEnemy.health -= t.dps;
+						closestEnemy.health -= t.dps + (int)((rnd.NextDouble() * t.dps_variation) - (t.dps_variation / 2f));
 						t.lastFireTime = time;
 						PlaySound("laser1");
 					}
@@ -406,8 +411,12 @@ namespace TowerDefense
 				{
 					var src = t.BulletLine.Value.Item1;
 					var dst = t.BulletLine.Value.Item2;
-					DrawLine(_spriteBatch, src, dst);
+					_spriteBatch.DrawLine(src, dst, Color.Aqua, 5);
 				}
+
+				// range
+				var c = new CircleF(t.Center.ToPoint(), t.range);
+				_spriteBatch.DrawCircle(c, 32, Color.MediumPurple, 2);
 			}
 
 			_spriteBatch.End();
@@ -422,45 +431,36 @@ namespace TowerDefense
 			_spriteBatch.Draw(pixel, new Rectangle(0, 0, 16, 200), Color.Red);
 			_spriteBatch.Draw(pixel, new Rectangle(0, 0, 16, (int)(goalHealth / goalMaxHealth * 200f)), Color.Green);
 
-			// hasPath status
-			_spriteBatch.Draw(pixel, new Rectangle(16, 0, 16, 16), hasPath ? Color.Green : Color.Red);
-
-			// drawing mode status
-			_spriteBatch.Draw(pixel, new Rectangle(32, 0, 16, 16), mapDrawingMode ? Color.Green : Color.Red);
-
 			_spriteBatch.End();
+
+			DrawImGui(gameTime);
 
 			base.Draw(gameTime);
 		}
-
-		void DrawLine(SpriteBatch sb, Vector2 start, Vector2 end)
+		void DrawImGui(GameTime gameTime)
 		{
-			Vector2 edge = end - start;
-			// calculate angle to rotate line
-			float angle = (float)Math.Atan2(edge.Y, edge.X);
+			// ImGUI
+			GuiRenderer.BeginLayout(gameTime);
+			if (ImGui.CollapsingHeader("Program Settings", ImGuiTreeNodeFlags.DefaultOpen))
+			{
+				var mode = mapDrawingMode ? "Towers" : "Tiles";
+				_ = ImGui.Checkbox($"DrawMode={mode}", ref mapDrawingMode);
+				ImGui.Text($"HasPath={hasPath}");
+				ImGui.Text($"UseHalfPixelOffset={_graphics.GraphicsDevice.UseHalfPixelOffset}");
+			}
 
-			sb.Draw(pixel,
-				new Rectangle(// rectangle defines shape of line and position of start of line
-					(int)start.X,
-					(int)start.Y,
-					(int)edge.Length(), //sb will stretch the texture to fill this rectangle
-					3), //width of line, change this to make thicker line
-				null,
-				Color.Aqua, //colour of line
-				angle,     //angle of line (calulated above)
-				new Vector2(0, 0), // point in line about which to rotate
-				SpriteEffects.None,
-				0);
+			GuiRenderer.EndLayout();
 		}
 	}
 
 	class Tower
 	{
 		public int dps = 25;
-		public float cooldown = 0.5f;
+		public int dps_variation = 5;
+		public float cooldown = 0.53f;
 		public float lastFireTime;
 		public float range = 96;
-		public float bulletDrawFadeTime = 0.2f;
+		public float bulletDrawFadeTime = 0.27f;
 		public (Vector2, Vector2)? BulletLine { get; set; }
 		public Point Tile { get; set; }
 
