@@ -422,7 +422,7 @@ namespace TowerDefense.Screens
 			GuiRenderer.BeginLayout(gameTime);
 			if (ImGui.CollapsingHeader("Program Settings", ImGuiTreeNodeFlags.DefaultOpen))
 			{
-				var mode = mapDrawingMode ? "Towers" : "Tiles";
+				var mode = mapDrawingMode ? "Tiles" : "Towers";
 				_ = ImGui.Checkbox($"DrawMode={mode}", ref mapDrawingMode);
 				ImGui.Text($"HasPath={hasPath}");
 				ImGui.Text($"UseHalfPixelOffset={Game.GraphicsDevice.UseHalfPixelOffset}");
