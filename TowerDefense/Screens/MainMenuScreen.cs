@@ -49,21 +49,26 @@ namespace TowerDefense.Screens
 
 		public override void Draw(GameTime gameTime)
 		{
-			Game.GraphicsDevice.Clear(Color.BlanchedAlmond);
+			Game.GraphicsDevice.Clear(Color.BlueViolet);
 
-			_spriteBatch.Begin(SpriteSortMode.Deferred, null, SamplerState.LinearClamp);
+			_spriteBatch.Begin(SpriteSortMode.Immediate, null, SamplerState.PointClamp);
 
-			var centre = Game.GraphicsDevice.Viewport.Width / 2;
+			var centre = Game.GraphicsDevice.Viewport.Width / 2f;
 			var font = GameServices.Fonts["SegoeUI"];
 			var heading = "Tower Defense";
-			var headingScale = 3f;
-			var headingFontSize = font.MeasureString(heading) * headingScale;
+			var ms = font.MeasureString(heading);
+			var fontWidth = ms.X;
+			var expectedWidth = Game.GraphicsDevice.Viewport.Width * 0.5f;
+			var headingScale = expectedWidth / fontWidth;
+			var headingFontSize = ms * headingScale;
+			var tenthViewportHeight = Game.GraphicsDevice.Viewport.Height / 10f;
+			var fontDrawPos = new Vector2(centre - (headingFontSize.X / 2), tenthViewportHeight);
+			_spriteBatch.DrawString(font, heading, fontDrawPos, Color.White, 0, Vector2.Zero, headingScale, SpriteEffects.None, 0);
 
-			_spriteBatch.DrawString(font, heading, new Vector2(centre - (headingFontSize.X / 2), headingFontSize.Y), Color.White, 0, Vector2.Zero, headingScale, SpriteEffects.None, 0);
-			var yStart = 140;
+			var yStart = fontDrawPos.Y + headingFontSize.Y + tenthViewportHeight;
 			foreach (var v in screenLinks)
 			{
-				v.Draw(gameTime, _spriteBatch, new Vector2(centre, yStart));
+				v.Draw(gameTime, _spriteBatch, new Vector2(centre, yStart), headingScale * 0.35f);
 				yStart += (int)(v.Bounds.Height + (v.Bounds.Height / 2f));
 			}
 
@@ -103,20 +108,19 @@ namespace TowerDefense.Screens
 			}
 		}
 
-		public void Draw(GameTime gameTime, SpriteBatch _spriteBatch, Vector2 drawCentreAt)
+		public void Draw(GameTime gameTime, SpriteBatch _spriteBatch, Vector2 drawCentreAt, float scale)
 		{
-			var textScale = 1f;
-			var fontSize = font.MeasureString(text) * textScale;
-			var drawPos = drawCentreAt - new Vector2(fontSize.X / 2, fontSize.Y / 2);
+			var fontDimensions = font.MeasureString(text) * scale;
+			var drawPos = drawCentreAt - new Vector2(fontDimensions.X / 2, fontDimensions.Y / 2);
 
 			var color = Color.DarkGray;
 			if (MouseOver)
 				color = Color.Gray;
 			if (Clicking)
 				color = Color.DarkOrchid;
-			_spriteBatch.DrawString(font, text, drawPos, color);
+			_spriteBatch.DrawString(font, text, drawPos, color, 0, Vector2.Zero, scale, SpriteEffects.None, 0);
 
-			Bounds = new RectangleF(drawPos, fontSize);
+			Bounds = new RectangleF(drawPos, fontDimensions);
 			Bounds.Inflate(2, 2);
 
 			// debug

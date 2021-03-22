@@ -19,21 +19,19 @@ namespace TowerDefense.Screens
 		Tile[,] map;
 		int mapWidth = 10;
 		int mapHeight = 10;
-		Texture2D pixel;
 		Dictionary<TileType, Color> colourLookup;
 		List<Point> enemyPath;
 		bool hasPath;
-		double lastSpawnTime;
-		double spawnInterval = 1.0;
+		int tileSize = 64;
+
 		List<Enemy> enemies;
-		float speed = 2f;
+		Spawner spawner;
+
 		float goalHealth = 1000;
 		float goalMaxHealth = 1000;
 		bool mapDrawingMode = true;
-		int enemyInitialHealth = 100;
 		List<Tower> towers;
 		int score = 0;
-		Random rnd;
 
 		public MainGameScreen(Game game) : base(game)
 		{
@@ -41,20 +39,20 @@ namespace TowerDefense.Screens
 
 		public override void Initialize()
 		{
-			pixel = new Texture2D(Game.GraphicsDevice, 1, 1);
+			var pixel = new Texture2D(Game.GraphicsDevice, 1, 1);
 			pixel.SetData(new Color[] { Color.White });
+			GameServices.Textures.Add("pixel", pixel);
 
 			enemyPath = new List<Point>();
 			enemies = new List<Enemy>();
 			towers = new List<Tower>();
-
-			rnd = new Random();
+			spawner = new Spawner();
 
 			colourLookup = new Dictionary<TileType, Color>();
 			colourLookup.Add(TileType.Blocked, Color.Black);
 			colourLookup.Add(TileType.Free, Color.LightGray);
 			colourLookup.Add(TileType.Goal, Color.Red);
-			colourLookup.Add(TileType.Path, Color.SandyBrown);
+			colourLookup.Add(TileType.Path, Color.SaddleBrown);
 			colourLookup.Add(TileType.Spawn, Color.Green);
 
 
@@ -94,8 +92,8 @@ namespace TowerDefense.Screens
 		public override void Update(GameTime gameTime)
 		{
 			var mouse = Mouse.GetState();
-			var translated = mouse.Position.ToVector2() - new Vector2(64, 64);
-			var mouseTile = new Point((int)(translated.X / 32), (int)(translated.Y / 32));
+			var translated = mouse.Position.ToVector2() - new Vector2(tileSize * 2, tileSize * 2);
+			var mouseTile = new Point((int)(translated.X / tileSize), (int)(translated.Y / tileSize));
 
 			if (Game.Services.GetService<InputManager>().IsNewKeyPress(Keys.Escape))
 			{
@@ -111,7 +109,7 @@ namespace TowerDefense.Screens
 					var tile = map[mouseTile.Y, mouseTile.X];
 					if (mouse.LeftButton == ButtonState.Pressed)
 					{
-						if (tile.type != TileType.Goal && tile.type != TileType.Spawn)
+						if (tile.type != TileType.Goal && tile.type != TileType.Spawn && tile.tower == null)
 						{
 							tile.type = TileType.Path;
 						}
@@ -137,12 +135,13 @@ namespace TowerDefense.Screens
 						if (tile.type == TileType.Free && tile.tower == null)
 						{
 							tile.tower = new Tower(mouseTile);
+							tile.tower.tileSize = tileSize;
 							towers.Add(tile.tower);
 						}
 					}
 					if (mouse.RightButton == ButtonState.Pressed)
 					{
-						if (tile.type == TileType.Free && tile.tower != null)
+						if (tile.tower != null)
 						{
 							_ = towers.Remove(tile.tower);
 							tile.tower = null;
@@ -160,7 +159,7 @@ namespace TowerDefense.Screens
 		{
 			foreach (var t in towers)
 			{
-				var time = (float)gameTime.TotalGameTime.TotalSeconds;
+				var time = (float)gameTime.TotalGameTime.TotalMilliseconds;
 				if (time - t.lastFireTime > t.cooldown)
 				{
 					Enemy closestEnemy = null;
@@ -179,7 +178,8 @@ namespace TowerDefense.Screens
 					{
 						// fire at enemy
 						t.BulletLine = (t.Center, closestEnemy.position);
-						closestEnemy.health -= t.dps + (int)((rnd.NextDouble() * t.dps_variation) - (t.dps_variation / 2f));
+						t.ShootAt(closestEnemy);
+
 						t.lastFireTime = time;
 						PlaySound("laser1");
 					}
@@ -222,18 +222,14 @@ namespace TowerDefense.Screens
 			}
 
 			var goal = FindTile(map, TileType.Goal);
-			// spawn enemies
-			var curr = gameTime.TotalGameTime.TotalSeconds;
-			if (curr - lastSpawnTime > spawnInterval)
+
+			if (spawner.IsActive && spawner.ShouldSpawn(gameTime))
 			{
-				//if (goalHealth > 0)
-				{
-					// spawn
-					var spawn = FindTile(map, TileType.Spawn);
-					enemies.Add(new Enemy((spawn.ToVector2() * new Vector2(32)) + new Vector2(16), enemyInitialHealth));
-					lastSpawnTime = curr;
-					PlaySound("blip1");
-				}
+				var spawn = FindTile(map, TileType.Spawn);
+				var vec = (spawn.ToVector2() * new Vector2(tileSize)) + new Vector2(tileSize / 2);
+				var enemy = spawner.Spawn(gameTime, vec);
+				enemies.Add(enemy);
+				PlaySound("blip1");
 			}
 
 			// update enemies
@@ -241,16 +237,16 @@ namespace TowerDefense.Screens
 			var toDelete = new List<Enemy>();
 			foreach (var e in enemies)
 			{
-				if (e.health <= 0)
+				if (e.IsDead)
 				{
 					// enemy died
-					score += enemyInitialHealth;
+					score += e.value;
 					toDelete.Add(e);
 					PlaySound("explosion1");
 					continue;
 				}
 
-				var etile = (e.position / new Vector2(32)).ToPoint();
+				var etile = (e.position / new Vector2(tileSize)).ToPoint();
 
 				if (etile == goal)
 				{
@@ -270,10 +266,10 @@ namespace TowerDefense.Screens
 
 				var nextTileIndex = index + 1;
 				var nextTile = enemyPath[nextTileIndex];
-				var dst = nextTile.ToVector2() * new Vector2(32) + new Vector2(16);
+				var dst = (nextTile.ToVector2() * new Vector2(tileSize)) + new Vector2(tileSize / 2);
 				var dir = dst - e.position;
 				dir.Normalize();
-				e.position += dir * new Vector2(speed);
+				e.position += dir * new Vector2(e.speed);
 			}
 
 			// 'kill' enemies that reached the base
@@ -353,50 +349,39 @@ namespace TowerDefense.Screens
 		public override void Draw(GameTime gameTime)
 		{
 			Game.GraphicsDevice.Clear(Color.CornflowerBlue);
-
 			// map
-			_spriteBatch.Begin(transformMatrix: Matrix.CreateTranslation(64, 64, 0));
+			_spriteBatch.Begin(transformMatrix: Matrix.CreateTranslation(tileSize * 2, tileSize * 2, 0), blendState: BlendState.NonPremultiplied);
 
 			for (var y = 0; y < mapHeight; y++)
 			{
 				for (var x = 0; x < mapWidth; x++)
 				{
-					_spriteBatch.Draw(pixel, new Rectangle(x * 32, y * 32, 32, 32), Color.Black);
-					_spriteBatch.Draw(pixel, new Rectangle(x * 32 + 1, y * 32 + 1, 30, 30), colourLookup[map[y, x].type]);
+					_spriteBatch.FillRectangle(new Rectangle(x * tileSize, y * tileSize, tileSize, tileSize), Color.Black);
+					_spriteBatch.FillRectangle(new Rectangle(x * tileSize + 1, y * tileSize + 1, tileSize - 1, tileSize - 1), colourLookup[map[y, x].type]);
 				}
 			}
 
+			var pathMarkerSize = 8;
 			foreach (var p in enemyPath)
 			{
-				_spriteBatch.Draw(pixel, new Rectangle(p.X * 32 + 12, p.Y * 32 + 12, 8, 8), Color.Yellow);
+
+				_spriteBatch.FillRectangle(
+					new Rectangle(
+						p.X * tileSize + tileSize / 2 - (pathMarkerSize / 2),
+						p.Y * tileSize + tileSize / 2 - (pathMarkerSize / 2),
+						pathMarkerSize,
+						pathMarkerSize),
+					Color.BlanchedAlmond);
 			}
 
 			foreach (var e in enemies)
 			{
-				_spriteBatch.Draw(pixel, new Rectangle((int)e.position.X - 4, (int)e.position.Y - 4, 8, 8), Color.Blue);
-
-				// health bar
-				var barWidth = 32;
-				var percent = (float)e.health / enemyInitialHealth;
-				_spriteBatch.Draw(pixel, new Rectangle((int)e.position.X - barWidth / 2, (int)e.position.Y - 4 - 8, barWidth, 4), Color.Red);
-				_spriteBatch.Draw(pixel, new Rectangle((int)e.position.X - barWidth / 2, (int)e.position.Y - 4 - 8, (int)(barWidth * percent), 4), Color.Green);
+				e.Draw(gameTime, _spriteBatch, tileSize);
 			}
 
 			foreach (var t in towers)
 			{
-				_spriteBatch.Draw(pixel, new Rectangle(t.Tile.X * 32 + 4, t.Tile.Y * 32 + 4, 24, 24), Color.Purple);
-
-				// bullet line
-				if (t.BulletLine.HasValue)
-				{
-					var src = t.BulletLine.Value.Item1;
-					var dst = t.BulletLine.Value.Item2;
-					_spriteBatch.DrawLine(src, dst, Color.Aqua, 5);
-				}
-
-				// range
-				var c = new CircleF(t.Center.ToPoint(), t.range);
-				_spriteBatch.DrawCircle(c, 32, Color.MediumPurple, 2);
+				t.Draw(_spriteBatch, gameTime);
 			}
 
 			_spriteBatch.End();
@@ -408,8 +393,10 @@ namespace TowerDefense.Screens
 			_spriteBatch.Begin();
 
 			// base health bar
-			_spriteBatch.Draw(pixel, new Rectangle(0, 0, 16, 200), Color.Red);
-			_spriteBatch.Draw(pixel, new Rectangle(0, 0, 16, (int)(goalHealth / goalMaxHealth * 200f)), Color.Green);
+			_spriteBatch.FillRectangle(new Rectangle(0, 0, tileSize / 2, 200), Color.Red);
+			_spriteBatch.FillRectangle(new Rectangle(0, 0, tileSize / 2, (int)(goalHealth / goalMaxHealth * 200f)), Color.Green);
+
+			_spriteBatch.DrawString(GameServices.Fonts["SegoeUI"], score.ToString(), new Vector2(10, 10), Color.White);
 
 			_spriteBatch.End();
 

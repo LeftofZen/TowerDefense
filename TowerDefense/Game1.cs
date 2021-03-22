@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Audio;
 using Microsoft.Xna.Framework.Graphics;
@@ -15,6 +16,7 @@ namespace TowerDefense
 		public static readonly Dictionary<string, SpriteFont> Fonts = new Dictionary<string, SpriteFont>(); //
 		public static readonly Dictionary<string, SoundEffect> SoundEffects = new Dictionary<string, SoundEffect>(); // SoundBank??
 		public static readonly Dictionary<string, Song> Songs = new Dictionary<string, Song>(); // SongCollection??
+		public static readonly Random Random = new Random();
 	}
 
 	public class Game1 : Game
@@ -25,7 +27,6 @@ namespace TowerDefense
 		public Game1()
 		{
 			_graphics = new GraphicsDeviceManager(this);
-			_graphics.SynchronizeWithVerticalRetrace = false;
 
 			Content.RootDirectory = "Content";
 
@@ -35,6 +36,11 @@ namespace TowerDefense
 
 		protected override void Initialize()
 		{
+			_graphics.SynchronizeWithVerticalRetrace = false;
+			_graphics.PreferredBackBufferWidth = 1920;
+			_graphics.PreferredBackBufferHeight = 1080;
+			_graphics.ApplyChanges();
+
 			screenManager = new ScreenManager();
 			Components.Add(screenManager);
 			Services.AddService(typeof(ScreenManager), screenManager);
@@ -69,47 +75,6 @@ namespace TowerDefense
 		{
 			GraphicsDevice.Clear(Color.SteelBlue);
 			base.Draw(gameTime);
-		}
-	}
-
-	class Tower
-	{
-		public int dps = 25;
-		public int dps_variation = 5;
-		public float cooldown = 0.53f;
-		public float lastFireTime;
-		public float range = 96;
-		public float bulletDrawFadeTime = 0.27f;
-		public (Vector2, Vector2)? BulletLine { get; set; }
-		public Point Tile { get; set; }
-
-		public Vector2 Center => (Tile.ToVector2() * new Vector2(32)) + new Vector2(16);
-
-		public Tower(Point tile) => Tile = tile;
-
-		public float distToEnemy(Enemy e) => Vector2.Distance(e.position, Center);
-	}
-
-	enum TileType
-	{
-		Path, Free, Blocked, Spawn, Goal
-	}
-
-	class Tile
-	{
-		public Tower tower;
-		public TileType type;
-	}
-
-	class Enemy
-	{
-		public Vector2 position;
-		public int health;
-
-		public Enemy(Vector2 position, int health)
-		{
-			this.position = position;
-			this.health = health;
 		}
 	}
 }
